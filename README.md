@@ -10,15 +10,15 @@ Excel/CSV/PDF exports. Built from *QA LiveSync — SRS v1.0*, with Supabase in p
 ## Architecture
 
 ```
-Google Sheets ──(service account, read-only)──▶ Edge Function sync-sheets ──▶ snapshots table
-       ▲ every 3 min: pg_cron + pg_net              ▲ Sync Now (approved user)        │ RLS: approved users only
-                                                                                     ▼
+Google Sheets ── Apps Script (owner's account, time trigger) ──▶ Edge Function push-sheets ──▶ snapshots table
+                                                                                                │ RLS: approved users only
+                                                                                                ▼
                          GitHub Pages (React) ── adapter → calculation layer → KPIs, charts, table, exports
 ```
 
 | SRS (Firebase) | This build |
 | --- | --- |
-| Cloud Function, scheduled | Edge Function `sync-sheets`, `pg_cron` every 3 min (FR-04) |
+| Cloud Function, scheduled | Google Apps Script time trigger → Edge Function `push-sheets` (FR-04) |
 | Firestore snapshots | `snapshots` table: raw cell values per sync; unchanged reads only bump `checked_at` (FR-08) |
 | Firebase Auth | Supabase Auth with Google + `allowed_users` table + RLS (FR-54) |
 | Firebase Hosting | GitHub Pages, deployed by `.github/workflows/deploy.yml` |
@@ -31,24 +31,26 @@ Google Sheets ──(service account, read-only)──▶ Edge Function sync-she
 | `src/lib/charts.ts` | Chart 1–8 options |
 | `src/lib/table.ts`, `src/lib/export.ts` | Detailed table model; Excel, CSV (formula-safe), PDF |
 | `supabase/migrations/` | Schema, RLS, cron job |
-| `supabase/functions/sync-sheets/` | Sheets → snapshot sync |
+| `supabase/functions/push-sheets/` | Receives values from the Apps Script (active) |
+| `supabase/functions/sync-sheets/` | Service-account pull (retired: key creation is blocked by org policy) |
 
 ## One-time setup (owner)
 
-Supabase project: `qa-livesync` (`bhazbqurcjlvngqutudr`, region ap-south-1). Schema, function,
-cron job, the three projects and today's data are already in place.
+Supabase project: `qa-livesync` (`bhazbqurcjlvngqutudr`, region ap-south-1). Schema, functions,
+the three projects and today's data are already in place.
 
-### 1. Google service account (enables sync)
+### 1. Data feed (Google Apps Script) — done
 
-1. In Google Cloud Console create a project (or reuse one), enable **Google Sheets API**.
-2. IAM & Admin → Service Accounts → create `qa-livesync-sync`; Keys → Add key → JSON.
-3. Share each workbook (EDCS-, DIE-, Data sharing DIE-QA Metrics Report) with the service
-   account's email as **Viewer**.
-4. Supabase Dashboard → Edge Functions → Secrets → add `GOOGLE_SERVICE_ACCOUNT_JSON` with the
-   whole JSON key file as the value.
+An Apps Script under the sheet owner's Google account reads each project's tab and POSTs it to
+`https://bhazbqurcjlvngqutudr.supabase.co/functions/v1/push-sheets`:
 
-Until this is done, Sync Now reports "GOOGLE_SERVICE_ACCOUNT_JSON secret is not set" and the
-dashboard keeps showing the stored data.
+- `register` — claims the push token (only its SHA-256 hash is stored in `push_token`).
+- `config` — returns the enabled projects (workbook ID, tab, range), so new projects need no script change.
+- `push` — `{ results: [{ project_id, values } | { project_id, error }] }`; unchanged values only bump `checked_at`.
+
+The dashboard shows **Failed · showing last data** if the script reports an error or has not
+checked in for 15 minutes. Sync Now re-reads the latest pushed data. To rotate the token:
+`delete from public.push_token;` then run the script's register step again.
 
 ### 2. Google sign-in
 
@@ -70,18 +72,7 @@ insert into public.allowed_users (domain) values ('yourcompany.com');  -- a whol
 ```sql
 insert into public.projects (name, spreadsheet_id, sort) values ('New Project', '<workbook id>', 3);
 ```
-Share the workbook with the service account. No code change is needed.
-
-### Scheduled sync
-
-The cron job `sync-sheets` posts to the function every 3 minutes with the Vault secret
-`sync_secret`; the function checks it with `public.sync_secret_matches()`. Vault also holds
-`project_url`. For a fresh project, create both:
-
-```sql
-select vault.create_secret('https://<ref>.supabase.co', 'project_url');
-select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'sync_secret');
-```
+The Apps Script owner must be able to open the workbook. No code change is needed.
 
 ## Development
 

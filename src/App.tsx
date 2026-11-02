@@ -4,7 +4,7 @@ import { parseRows } from "./lib/adapter";
 import { groupModules, mainModuleOf, moduleChecks, sumRows } from "./lib/calc";
 import { PALETTES, useTheme } from "./lib/theme";
 import {
-  DEMO, isApproved, loadProjects, loadSnapshotMetas, loadSnapshotValues, supabase, syncNow,
+  DEMO, isApproved, loadProjects, loadSnapshotMetas, loadSnapshotValues, supabase,
   type Project, type SnapshotMeta,
 } from "./lib/data";
 import { FORMULAS } from "./lib/formulas";
@@ -16,6 +16,8 @@ import { KpiCards } from "./components/KpiCards";
 import { Sidebar, type View } from "./components/Sidebar";
 
 const POLL_MS = 60_000;
+/** The Apps Script pushes on a timer; no check-in for this long means the feed has stopped. */
+const STALE_MS = 15 * 60_000;
 
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -106,7 +108,7 @@ function Dashboard({ email }: { email: string }) {
     setProjectId((cur) => cur || p[0]?.id || "");
   }, []);
 
-  // FR-03: read on open; afterwards poll the stored snapshots, which the server refreshes every 3 minutes.
+  // FR-03: read on open; afterwards poll the stored snapshots, which the Apps Script keeps current.
   useEffect(() => {
     refresh().catch((e) => setLoadError(String(e.message ?? e)));
     const t = setInterval(() => refresh().catch(() => undefined), POLL_MS);
@@ -155,18 +157,20 @@ function Dashboard({ email }: { email: string }) {
     setSub(multi ? module : null);
   };
 
+  // Sync Now re-reads the latest data the Apps Script has pushed; the browser cannot run the script itself.
   const doSync = async () => {
     setSyncing(true);
     setSyncNote(null);
-    const res = await syncNow();
-    if (!res.ok) setSyncNote(res.message ?? "Sync failed");
-    await refresh().catch(() => undefined);
+    await refresh().catch((e) => setSyncNote(String(e.message ?? e)));
     setSyncing(false);
   };
 
   const unreconciled = scopeRows.some((r) => r.totalTc > 0 && moduleChecks(r).statusDiff !== 0);
   const failedSinceOk = !!latestAttempt && latestAttempt.status === "failed" && (!latestOk || latestAttempt.synced_at > latestOk.checked_at);
-  const syncState: SyncState = syncing || !rows ? "validating" : failedSinceOk ? "failed" : unreconciled ? "reconcile" : "validated";
+  const staleMin = latestOk ? Math.floor((Date.now() - Date.parse(latestOk.checked_at)) / 60_000) : 0;
+  const stale = staleMin * 60_000 > STALE_MS;
+  const syncState: SyncState = syncing || !rows ? "validating" : failedSinceOk || stale ? "failed" : unreconciled ? "reconcile" : "validated";
+  const feedNote = syncNote ?? (failedSinceOk ? latestAttempt.error : stale ? `No update from Apps Script for ${staleMin} min` : null);
 
   if (loadError && !rows) return <Splash text={`Could not load data: ${loadError}`} />;
   if (!project) return <Splash text="Loading projects…" />;
@@ -201,7 +205,7 @@ function Dashboard({ email }: { email: string }) {
       />
       <div className="content">
         <Header
-          crumbs={crumbs} title={`${project.name} — ${viewName}`} sync={syncState} syncNote={syncNote}
+          crumbs={crumbs} title={`${project.name} — ${viewName}`} sync={syncState} syncNote={feedNote}
           lastSync={fmtTime(latestOk?.checked_at)} theme={choice} onTheme={setChoice}
           onSync={doSync} syncing={syncing} onMenu={() => setDrawer(true)}
           onSignOut={() => supabase.auth.signOut()} user={email}

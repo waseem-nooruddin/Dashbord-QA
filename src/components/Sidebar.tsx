@@ -102,7 +102,7 @@ export function Sidebar(p: Props) {
         </button>
         {!p.minimized && (
           <p className="side-note">
-            {p.projects.length} connected workbook{p.projects.length === 1 ? "" : "s"} · Google Sheets, read-only · synced every 3 min
+            {p.projects.length} connected workbook{p.projects.length === 1 ? "" : "s"} · Google Sheets, pushed by Apps Script
           </p>
         )}
       </nav>

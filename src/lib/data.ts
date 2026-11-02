@@ -57,23 +57,3 @@ export async function loadSnapshotValues(id: number): Promise<string[][]> {
   if (error) throw error;
   return (data.values ?? []) as string[][];
 }
-
-export interface SyncResult {
-  ok: boolean;
-  message?: string;
-}
-
-export async function syncNow(): Promise<SyncResult> {
-  if (DEMO) return { ok: false, message: "Demo mode: sync disabled" };
-  const { data, error } = await supabase.functions.invoke("sync-sheets", { method: "POST", body: {} });
-  if (error) {
-    let message = error.message;
-    try {
-      const body = await (error as { context?: Response }).context?.json();
-      if (body?.error) message = body.error;
-    } catch { /* keep the generic message */ }
-    return { ok: false, message };
-  }
-  const failed = (data?.results ?? []).filter((r: { status: string }) => r.status !== "ok");
-  return failed.length ? { ok: false, message: `${failed.length} source(s) failed to sync` } : { ok: true };
-}
