@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.env.local
+test-results
+playwright-report
+# Real sheet data must not reach the public repo
+tests/fixtures/local/

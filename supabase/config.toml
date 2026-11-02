@@ -1,0 +1,5 @@
+project_id = "bhazbqurcjlvngqutudr"
+
+[functions.sync-sheets]
+# The function authenticates callers itself (cron secret or approved user).
+verify_jwt = false
