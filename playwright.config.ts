@@ -7,7 +7,8 @@ export default defineConfig({
   webServer: {
     command: "npx vite --port 5191 --strictPort",
     url: "http://localhost:5191",
-    env: { VITE_DEMO: "synthetic" },
+    // Placeholder client values: demo mode never calls Supabase.
+    env: { VITE_DEMO: "synthetic", VITE_SUPABASE_URL: "http://localhost:54321", VITE_SUPABASE_PUBLISHABLE_KEY: "demo" },
     reuseExistingServer: false,
   },
   projects: [
